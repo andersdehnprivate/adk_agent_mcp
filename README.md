@@ -48,7 +48,7 @@ A lightweight, local chat interface that integrates OpenAI models with custom to
    Create a `.env` file with:
    ```
    OPENAI_API_KEY=your_openai_api_key_here
-   MCP_SERVER_URL=http://localhost:3000/mcp
+   MCP_SERVER_URL=http://localhost:3000
    ```
 
 ## 🔧 Configuration
@@ -62,7 +62,7 @@ Create a `.env` file in the project root:
 OPENAI_API_KEY=your_openai_api_key_here
 
 # Optional: MCP Server Configuration
-MCP_SERVER_URL=http://localhost:3000/mcp
+MCP_SERVER_URL=http://localhost:3000
 ```
 
 ### MCP Server Setup

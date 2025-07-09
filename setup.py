@@ -58,7 +58,7 @@ def create_env_file():
 OPENAI_API_KEY=your_openai_api_key_here
 
 # MCP Server Configuration
-MCP_SERVER_URL=http://localhost:3000/mcp
+MCP_SERVER_URL=http://localhost:3000
 """
     
     try:

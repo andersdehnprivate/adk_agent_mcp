@@ -106,7 +106,7 @@ async def get_billy_mcp_client():
 
 # Billy.dk MCP Tool Functions
 async def list_invoices() -> str:
-    """List all invoices from Billy.dk"""
+    """List all invoices from Billy.dk. Use this when user asks about invoices, not customers."""
     try:
         client = await get_billy_mcp_client()
         result = await client.call_tool("listInvoices")
@@ -147,7 +147,7 @@ async def create_invoice(contact_id: str, amount: float, state: str = "draft") -
         return f"❌ Error creating invoice: {e}"
 
 async def list_customers() -> str:
-    """List all customers from Billy.dk"""
+    """List all customers from Billy.dk. Use this when user asks about customers, not invoices."""
     try:
         client = await get_billy_mcp_client()
         result = await client.call_tool("listCustomers")
@@ -242,25 +242,35 @@ You have access to Billy.dk business management tools via the standard MCP proto
 - 👥 Manage customer information  
 - 💰 Analyze financial data and totals
 
+CRITICAL: Always maintain conversation context and understand what data type you're working with.
+
 When users ask about invoices, customers, or financial data, use the appropriate tools to provide accurate, up-to-date information.
 
 Available tools:
 - list_invoices(): Get all invoices
-- get_invoice(invoice_id): Get specific invoice details
+- get_invoice(invoice_id): Get specific invoice details  
 - create_invoice(contact_id, amount, state): Create new invoice
 - list_customers(): Get all customers
 - total_invoice_amount(start_date, end_date): Get total for date range
 
+Context Awareness Rules:
+1. If the user just showed/discussed CUSTOMERS, follow-up questions about "latest", "recent", "show me X" refer to CUSTOMERS
+2. If the user just showed/discussed INVOICES, follow-up questions about "latest", "recent", "show me X" refer to INVOICES
+3. If unclear, ask for clarification: "Do you mean customers or invoices?"
+4. Pay attention to the current conversation topic - don't switch between customers and invoices randomly
+
 Always:
 - Be helpful and professional
+- MAINTAIN CONVERSATION CONTEXT - remember what data type we're discussing
 - Use tools when relevant to the user's request
 - Explain what you're doing when using tools
 - Format responses in a clear, readable way
 - For dates, use YYYY-MM-DD format
+- If asked for "latest X" or "recent X", understand this refers to the current topic of conversation
 
 If a tool fails, inform the user politely and suggest alternatives.
 
-Keep responses concise and focused.""",
+Keep responses concise and focused, but always stay contextually aware.""",
         tools=tools  # Billy.dk tools using standard MCP protocol
     )
     

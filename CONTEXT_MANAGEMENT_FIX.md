@@ -69,9 +69,38 @@ Created comprehensive tests to verify the fix:
 
 ## Files Modified
 
-1. `billy_agent/agent.py` - Enhanced agent instructions and tool descriptions
-2. `test_context_fix.py` - Test to verify the fix works
-3. `CONTEXT_MANAGEMENT_FIX.md` - This documentation
+1. `billy_agent/agent.py` - Enhanced agent instructions, tool descriptions, and **dynamic tool discovery**
+2. `CONTEXT_MANAGEMENT_FIX.md` - This documentation
+
+## Additional Enhancement: Dynamic Tool Discovery
+
+After fixing the context management issue, we also implemented **dynamic tool discovery** to automatically find all available tools from the MCP server:
+
+- **Before**: Agent used 5 hardcoded tools
+- **After**: Agent dynamically discovers all 11 tools from MCP server
+- **Benefits**: 
+  - No maintenance needed when MCP server tools change
+  - Automatic access to new tools added to MCP server
+  - Tool descriptions pulled directly from MCP server metadata
+
+## MCP Session Management Fix
+
+We also fixed a critical issue where the agent couldn't access data from the MCP server:
+
+### The Problem
+- Agent could discover tools but couldn't access data when tools were called
+- Event loop and session management issues causing "no access to data" errors
+- Global MCP client sessions getting closed between requests
+
+### The Solution
+1. **Fresh Sessions**: Each MCP request now uses a fresh `aiohttp.ClientSession`
+2. **No Global Sessions**: Removed shared session management to avoid event loop conflicts
+3. **Simplified Client**: Streamlined MCP client to avoid session reuse issues
+
+### Results
+- ✅ **Data Access Working**: Agent can now retrieve 46 customers and 91 invoices
+- ✅ **No Session Errors**: Fresh sessions prevent event loop conflicts
+- ✅ **Reliable Operation**: Consistent data access across all tool calls
 
 ## How to Test
 

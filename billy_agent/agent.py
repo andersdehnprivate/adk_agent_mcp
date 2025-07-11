@@ -19,14 +19,10 @@ class BillyDkMcpClient:
     
     def __init__(self, mcp_url: str = "http://localhost:3000/mcp"):
         self.mcp_url = mcp_url
-        self.session = None
         self._request_id = 1
     
     async def _make_request(self, method: str, params: Dict[str, Any] = None) -> Dict[str, Any]:
         """Make a JSON-RPC request to the MCP server"""
-        if not self.session:
-            self.session = aiohttp.ClientSession()
-        
         request_data = {
             "jsonrpc": "2.0",
             "id": self._request_id,
@@ -35,24 +31,26 @@ class BillyDkMcpClient:
         }
         self._request_id += 1
         
-        try:
-            async with self.session.post(
-                self.mcp_url,
-                headers={"Content-Type": "application/json"},
-                json=request_data,
-                timeout=aiohttp.ClientTimeout(total=30)
-            ) as response:
-                response.raise_for_status()
-                result = await response.json()
-                
-                if "error" in result:
-                    raise Exception(f"MCP Error: {result['error']}")
-                
-                return result.get("result", {})
-        
-        except Exception as e:
-            print(f"❌ Billy.dk MCP request failed: {e}")
-            raise
+        # Use a fresh session for each request to avoid event loop issues
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.post(
+                    self.mcp_url,
+                    headers={"Content-Type": "application/json"},
+                    json=request_data,
+                    timeout=aiohttp.ClientTimeout(total=30)
+                ) as response:
+                    response.raise_for_status()
+                    result = await response.json()
+                    
+                    if "error" in result:
+                        raise Exception(f"MCP Error: {result['error']}")
+                    
+                    return result.get("result", {})
+            
+            except Exception as e:
+                print(f"❌ Billy.dk MCP request failed: {e}")
+                raise
     
     async def initialize(self):
         """Initialize the MCP session"""
@@ -83,9 +81,8 @@ class BillyDkMcpClient:
         })
     
     async def close(self):
-        """Close the session"""
-        if self.session:
-            await self.session.close()
+        """Close the session - no longer needed with fresh sessions"""
+        pass
 
 # Global MCP client instance
 _billy_mcp_client = None
@@ -93,16 +90,18 @@ _billy_mcp_client = None
 async def get_billy_mcp_client():
     """Get or create the Billy.dk MCP client"""
     global _billy_mcp_client
-    if not _billy_mcp_client:
-        base_url = os.getenv("MCP_SERVER_URL", "http://localhost:3000")
-        # Handle case where MCP_SERVER_URL already includes /mcp
-        if base_url.endswith("/mcp"):
-            mcp_url = base_url
-        else:
-            mcp_url = f"{base_url}/mcp"
-        _billy_mcp_client = BillyDkMcpClient(mcp_url)
-        await _billy_mcp_client.initialize()
-    return _billy_mcp_client
+    
+    # Always create a fresh client to avoid session issues
+    base_url = os.getenv("MCP_SERVER_URL", "http://localhost:3000")
+    # Handle case where MCP_SERVER_URL already includes /mcp
+    if base_url.endswith("/mcp"):
+        mcp_url = base_url
+    else:
+        mcp_url = f"{base_url}/mcp"
+    
+    client = BillyDkMcpClient(mcp_url)
+    await client.initialize()
+    return client
 
 # Billy.dk MCP Tool Functions
 async def list_invoices() -> str:
@@ -173,6 +172,102 @@ async def total_invoice_amount(start_date: str, end_date: str) -> str:
     except Exception as e:
         return f"❌ Error getting total amount: {e}"
 
+async def create_dynamic_mcp_tools():
+    """
+    Dynamically discover all available tools from the MCP server
+    and create FunctionTool objects for each one.
+    """
+    try:
+        # Get MCP client
+        client = await get_billy_mcp_client()
+        
+        # Discover all available tools
+        tools_result = await client.list_tools()
+        
+        if "tools" not in tools_result:
+            print("⚠️  No tools found in MCP server response")
+            return []
+        
+        discovered_tools = tools_result["tools"]
+        print(f"🔍 Discovered {len(discovered_tools)} tools from MCP server")
+        
+        # Create dynamic FunctionTool objects for each discovered tool
+        function_tools = []
+        
+        for tool_info in discovered_tools:
+            tool_name = tool_info.get("name", "unknown")
+            tool_description = tool_info.get("description", f"Tool: {tool_name}")
+            tool_schema = tool_info.get("inputSchema", {})
+            
+            print(f"   📋 {tool_name}: {tool_description}")
+            
+            # Create dynamic function for this tool
+            dynamic_func = create_dynamic_tool_function(tool_name, tool_description, tool_schema)
+            
+            # Create FunctionTool wrapper
+            function_tools.append(FunctionTool(dynamic_func))
+        
+        return function_tools
+        
+    except Exception as e:
+        print(f"❌ Error discovering MCP tools: {e}")
+        print("   Falling back to hardcoded tools...")
+        import traceback
+        traceback.print_exc()
+        
+        # Fallback to hardcoded tools
+        return [
+            FunctionTool(list_invoices),
+            FunctionTool(get_invoice),
+            FunctionTool(create_invoice),
+            FunctionTool(list_customers),
+            FunctionTool(total_invoice_amount)
+        ]
+
+def create_dynamic_tool_function(tool_name: str, description: str, schema: Dict[str, Any]):
+    """
+    Create a dynamic function for an MCP tool.
+    """
+    
+    # Extract parameter info from schema
+    properties = schema.get("properties", {})
+    required_params = schema.get("required", [])
+    
+    # Create function signature dynamically
+    if not properties:
+        # No parameters
+        async def dynamic_tool() -> str:
+            try:
+                client = await get_billy_mcp_client()
+                result = await client.call_tool(tool_name)
+                
+                if "content" in result and result["content"]:
+                    return result["content"][0].get("text", str(result))
+                return str(result)
+            except Exception as e:
+                return f"❌ Error calling {tool_name}: {e}"
+        
+        dynamic_tool.__name__ = tool_name
+        dynamic_tool.__doc__ = description
+        return dynamic_tool
+    
+    else:
+        # Has parameters - create function with **kwargs
+        async def dynamic_tool(**kwargs) -> str:
+            try:
+                client = await get_billy_mcp_client()
+                result = await client.call_tool(tool_name, kwargs)
+                
+                if "content" in result and result["content"]:
+                    return result["content"][0].get("text", str(result))
+                return str(result)
+            except Exception as e:
+                return f"❌ Error calling {tool_name}: {e}"
+        
+        dynamic_tool.__name__ = tool_name
+        dynamic_tool.__doc__ = description
+        return dynamic_tool
+
 def create_billy_agent():
     """
     Create a Billy.dk agent with proper MCP integration using standard HTTP protocol.
@@ -192,7 +287,7 @@ def create_billy_agent():
     # Prepare tools list
     tools = []
     
-    # Add Billy.dk MCP tools using standard HTTP protocol
+    # Add Billy.dk MCP tools using standard HTTP protocol - DYNAMIC DISCOVERY
     if mcp_server_url:
         try:
             print(f"🔧 Billy.dk MCP integration using standard HTTP protocol")
@@ -203,19 +298,23 @@ def create_billy_agent():
                 server_display = f"{mcp_server_url}/mcp"
             print(f"📡 Server: {server_display}")
             
-            # Create function tools for Billy.dk operations
-            billy_tools = [
-                FunctionTool(list_invoices),
-                FunctionTool(get_invoice),
-                FunctionTool(create_invoice),
-                FunctionTool(list_customers),
-                FunctionTool(total_invoice_amount)
-            ]
+            # Dynamically discover all available tools from MCP server
+            # Check if we're in an event loop
+            try:
+                loop = asyncio.get_running_loop()
+                # We're in an event loop, create a task instead
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as executor:
+                    future = executor.submit(asyncio.run, create_dynamic_mcp_tools())
+                    billy_tools = future.result()
+            except RuntimeError:
+                # No event loop running, safe to use asyncio.run
+                billy_tools = asyncio.run(create_dynamic_mcp_tools())
             
             tools.extend(billy_tools)
             
             print("✅ Billy.dk MCP tools added using standard protocol")
-            print("📋 Available tools: listInvoices, getInvoice, createInvoice, listCustomers, totalInvoiceAmount")
+            print(f"📋 Discovered {len(billy_tools)} tools from MCP server")
             
         except Exception as e:
             print(f"⚠️  Billy.dk MCP tool setup failed: {e}")
